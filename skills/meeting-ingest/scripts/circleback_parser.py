@@ -60,6 +60,13 @@ def parse(path):
         if m:
             segments.append(Segment(m.group(1), m.group(2).strip(), m.group(3)))
 
+    if not segments:
+        raise ParseError(
+            f"{path.name}: zero speaker segments — either the transcript is "
+            "empty upstream or the export format drifted; refusing to return "
+            "an empty parse"
+        )
+
     return Meeting(
         title=title,
         meeting_id=fields["meeting_id"],
