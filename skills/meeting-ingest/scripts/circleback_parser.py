@@ -60,6 +60,13 @@ def parse(path):
         if m:
             segments.append(Segment(m.group(1), m.group(2).strip(), m.group(3)))
 
+    missing = [f for f in ("meeting_id", "date", "source") if f not in fields]
+    if missing:
+        raise ParseError(
+            f"{path.name}: header missing {', '.join(missing)} — not a "
+            "normalized Circleback export"
+        )
+
     if not segments:
         raise ParseError(
             f"{path.name}: zero speaker segments — either the transcript is "

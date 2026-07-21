@@ -29,6 +29,10 @@ class ParseFailsLoudly(unittest.TestCase):
         with self.assertRaisesRegex(ParseError, "zero speaker segments"):
             parse(FIXTURES / "zero-segments.md")
 
+    def test_missing_header_raises(self):
+        with self.assertRaisesRegex(ParseError, "meeting_id"):
+            parse(FIXTURES / "no-header.md")
+
 
 if __name__ == "__main__":
     unittest.main()
