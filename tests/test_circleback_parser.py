@@ -1,3 +1,4 @@
+import os
 import pathlib
 import sys
 import unittest
@@ -32,6 +33,27 @@ class ParseFailsLoudly(unittest.TestCase):
     def test_missing_header_raises(self):
         with self.assertRaisesRegex(ParseError, "meeting_id"):
             parse(FIXTURES / "no-header.md")
+
+
+REAL_TRANSCRIPTS = pathlib.Path(
+    os.environ.get(
+        "MEM0_TRANSCRIPTS",
+        pathlib.Path.home() / "Desktop" / "resources" / "granola-transcripts",
+    )
+)
+_REAL_FILES = sorted(REAL_TRANSCRIPTS.glob("2026-06-0[234]-*.md")) \
+    if REAL_TRANSCRIPTS.exists() else []
+
+
+@unittest.skipUnless(_REAL_FILES, "real Circleback exports not on this machine")
+class ParseRealExports(unittest.TestCase):
+    def test_all_real_exports_parse(self):
+        self.assertEqual(len(_REAL_FILES), 3)
+        for path in _REAL_FILES:
+            meeting = parse(path)
+            self.assertEqual(meeting.source, "circleback")
+            self.assertGreater(len(meeting.segments), 50, path.name)
+            self.assertGreaterEqual(len(meeting.speakers), 2, path.name)
 
 
 if __name__ == "__main__":
