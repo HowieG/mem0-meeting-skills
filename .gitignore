@@ -2,3 +2,6 @@
 __pycache__/
 *.pyc
 config.local.sh
+
+# Editor/preview scratch artifacts
+.clearance-rendered-preview-*/

@@ -69,7 +69,35 @@ class Normalize(unittest.TestCase):
     def test_filename_is_dated_and_slugged(self):
         with tempfile.TemporaryDirectory() as d:
             path = write_transcript(MEETING, TRANSCRIPT, pathlib.Path(d))
-            self.assertEqual(path.name, "2026-06-01-t-mobile-mem0.md")
+            self.assertEqual(path.name, "2026-06-01-t-mobile-mem0-NaKjbI7V.md")
+
+    def test_same_title_and_date_do_not_collide(self):
+        """Two meetings sharing a title and date must not share a filename.
+
+        Recurring calendar invites produce exactly this: "30 Min Meeting
+        between X and Y" twice in one day. Slugging on title+date alone made
+        the second write clobber the first, destroying a transcript before it
+        was ever ingested — and the id filter cannot notice a file that no
+        longer exists.
+        """
+        a = {"id": "kQMUKO0I26rmCttWv66Nm", "name": "30 Min Meeting",
+             "createdAt": "2026-06-02T17:31:18.829Z"}
+        b = {"id": "bdRQMdrfVazWp69uO6bMG", "name": "30 Min Meeting",
+             "createdAt": "2026-06-02T16:30:08.346Z"}
+        with tempfile.TemporaryDirectory() as d:
+            pa = write_transcript(a, TRANSCRIPT, pathlib.Path(d))
+            pb = write_transcript(b, TRANSCRIPT, pathlib.Path(d))
+            self.assertNotEqual(pa, pb)
+            self.assertEqual(len(list(pathlib.Path(d).iterdir())), 2)
+            self.assertEqual(parse(pa).meeting_id, a["id"])
+            self.assertEqual(parse(pb).meeting_id, b["id"])
+
+    def test_rewriting_the_same_meeting_is_stable(self):
+        with tempfile.TemporaryDirectory() as d:
+            first = write_transcript(MEETING, TRANSCRIPT, pathlib.Path(d))
+            again = write_transcript(MEETING, TRANSCRIPT, pathlib.Path(d))
+            self.assertEqual(first, again)
+            self.assertEqual(len(list(pathlib.Path(d).iterdir())), 1)
 
     def test_empty_transcript_writes_nothing(self):
         with tempfile.TemporaryDirectory() as d:

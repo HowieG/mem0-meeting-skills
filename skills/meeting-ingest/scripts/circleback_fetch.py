@@ -65,6 +65,12 @@ def write_transcript(meeting, transcript, dest_dir):
         return None
     dest_dir = pathlib.Path(dest_dir)
     dest_dir.mkdir(parents=True, exist_ok=True)
-    path = dest_dir / f"{meeting['createdAt'][:10]}-{slugify(meeting['name'])}.md"
+    # The meeting id is part of the filename because title+date is not unique:
+    # a recurring invite yields "30 Min Meeting between X and Y" twice in one
+    # day, and slugging on title+date alone let the second write clobber the
+    # first — destroying a transcript before it was ever ingested, invisibly,
+    # since the id filter cannot miss a file that no longer exists.
+    stem = f"{meeting['createdAt'][:10]}-{slugify(meeting['name'])}-{meeting['id'][:8]}"
+    path = dest_dir / f"{stem}.md"
     path.write_text(normalize(meeting, transcript), encoding="utf-8")
     return path
