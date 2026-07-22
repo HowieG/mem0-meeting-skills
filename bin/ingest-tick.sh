@@ -9,7 +9,7 @@ set -uo pipefail
 REPO="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 SCRIPTS="$REPO/skills/meeting-ingest/scripts"
 VAULT="${MEM0_VAULT:-$HOME/Documents/mem0 vault}"
-SOURCE_DIR="${MEM0_TRANSCRIPTS:-$HOME/Desktop/resources/granola-transcripts}"
+SOURCE_DIR="${MEM0_TRANSCRIPTS:-$HOME/Desktop/resources/circleback-inbox}"
 WINDOW_DAYS="${INGEST_WINDOW_DAYS:-7}"
 LEDGER="${MEM0_LEDGER:-$HOME/Library/Logs/mem0-meeting-ingest.log}"
 

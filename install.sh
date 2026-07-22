@@ -10,6 +10,9 @@ set -euo pipefail
 
 REPO="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 DEST="$HOME/.claude/skills"
+# Backups live OUTSIDE $DEST on purpose: anything inside it is loaded as a
+# skill, so an in-place `foo.bak` becomes a duplicate ghost skill in the picker.
+BACKUPS="$HOME/.claude/skill-backups"
 VAULT="${MEM0_VAULT:-$HOME/Documents/mem0 vault}"
 VAULT_REMOTE="git@github.com:HowieG/mem0-vault.git"
 CLONE=false
@@ -30,7 +33,8 @@ for skill in "$REPO"/skills/*/; do
   if [ -L "$target" ]; then
     rm "$target"
   elif [ -e "$target" ]; then
-    backup="$target.bak.$(date +%Y%m%d%H%M%S)"
+    mkdir -p "$BACKUPS"
+    backup="$BACKUPS/$name.$(date +%Y%m%d%H%M%S)"
     mv "$target" "$backup"
     say "! $name existed as a real directory — moved to $backup"
   fi
