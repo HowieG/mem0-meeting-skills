@@ -28,47 +28,72 @@ python3 <this-dir>/scripts/ingest.py <transcript.md>
 
 ## Unattended tick (what `/loop` runs)
 
-One tick = fetch new meetings, ingest them, publish the vault. Run it with:
+One tick = fetch new meetings from Circleback, ingest them, publish the vault.
+
+Start it with:
 
 ```
-/loop 5m Run one meeting-ingest tick per the "Unattended tick" section of the meeting-ingest skill.
+/loop 5m Run one meeting-ingest tick: follow the "Unattended tick" section of the meeting-ingest skill exactly.
 ```
 
-You are an agent, so **you** make the Circleback MCP calls directly — there is
-no nested headless run for fetching. Do exactly this, and nothing else:
+**You are exactly two steps. Do these and nothing else.**
 
-1. `SearchMeetings` with `pageIndex: 0`, `startDate` = `INGEST_WINDOW_DAYS`
-   (default 7) before today, `endDate` = today.
-2. For each result, check whether any file under `<vault>/Meetings/` already
-   contains its id. Skip those — already ingested. **This check is the only
-   thing preventing double-ingestion; never skip it.**
-3. `GetTranscriptsForMeetings` for the ids that remain (batch, ≤50 per call).
-4. Write each one to the inbox using the project's normalizer — never
-   hand-roll the format:
+### Step 1 — Fetch (only you can do this; MCP needs an agent)
 
-   ```python
-   import sys; sys.path.insert(0, "<this-dir>/scripts")
-   from circleback_fetch import write_transcript
-   write_transcript(meeting_dict, transcript_list, inbox_dir)
-   ```
+```
+REPO=/Users/howardgil/Desktop/resources/mem0-meeting-skills
+INBOX=/Users/howardgil/Desktop/resources/circleback-inbox
+```
 
-   An empty transcript means Circleback is still processing. `write_transcript`
-   returns `None` and writes nothing — correct. A partial file would let the id
-   filter mark the meeting done forever.
-5. Run the batch ingester, which spawns an isolated headless extraction per
-   meeting so a long transcript never floods this session's context:
+1. `SearchMeetings` with `pageIndex: 0`, `startDate` = 7 days before today,
+   `endDate` = today.
+2. `GetTranscriptsForMeetings` for the returned ids (batch, ≤50 per call).
+   Don't pre-filter — step 2 handles idempotency, and skipping the filter here
+   only costs a little quota.
+3. Write each transcript with the project's normalizer. **Never hand-roll the
+   format** — the parser rejects anything else, deliberately:
 
    ```bash
-   python3 <this-dir>/scripts/batch.py <inbox_dir> --window-days 7
+   python3 -c "
+   import sys, json; sys.path.insert(0, '$REPO/skills/meeting-ingest/scripts')
+   from circleback_fetch import write_transcript
+   m, t = json.loads(sys.argv[1]), json.loads(sys.argv[2])
+   print(write_transcript(m, t, '$INBOX'))" \
+     '{\"id\":\"...\",\"name\":\"...\",\"createdAt\":\"2026-07-21T10:00:00.000Z\"}' \
+     '[{\"speaker\":\"...\",\"text\":\"...\",\"timestamp\":5.2}]'
    ```
 
-6. If `<vault>` has changes, commit (`chore(vault): automated ingest <stamp>`)
-   and push. If it has none, **make no commit** — a quiet tick must leave no
-   trace in git history.
-7. Report one line: meetings fetched, ingested, skipped, and whether you pushed.
+   `m` needs `id`, `name`, `createdAt` from `SearchMeetings`; `t` is the segment
+   list from `GetTranscriptsForMeetings`.
 
-Never ask the user anything during a tick. Gaps are written into the vault as
-`status: unconfirmed` and cleared later by `brain-resolution`.
+   An empty transcript means Circleback is still processing — `write_transcript`
+   returns `None` and writes nothing. That is correct: a partial file would let
+   the id filter mark the meeting done forever.
+
+### Step 2 — Ingest and publish (one command, no improvising)
+
+```bash
+MEM0_SKIP_FETCH=1 /Users/howardgil/Desktop/resources/mem0-meeting-skills/bin/ingest-tick.sh
+```
+
+This skips only the fetch you just did, then: filters out meetings already in
+the vault, runs an isolated headless extraction per new meeting (so a long
+transcript never floods your context), audits, and commits + pushes the vault
+**only if it changed**.
+
+### Then report one line
+
+Meetings fetched, ingested, skipped, and whether it pushed. Read the result from
+the ledger:
+
+```bash
+tail -3 ~/Library/Logs/mem0-meeting-ingest.log
+```
+
+**Never ask the user anything during a tick**, and never hand-edit the vault to
+"help" — gaps are written as `status: unconfirmed` and cleared later by
+`brain-resolution`. If a stage fails, say so and stop; the next tick retries,
+and a failed tick leaves the vault untouched by design.
 
 ## Validate without ingesting
 
