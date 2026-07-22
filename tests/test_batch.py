@@ -1,4 +1,5 @@
 import datetime
+import os
 import pathlib
 import sys
 import tempfile
@@ -214,6 +215,74 @@ class RunBatch(TempDirTestCase):
         self.assertEqual(calls, [])
         self.assertEqual(result.would_ingest, ["a.md"])
         self.assertEqual(vault_snapshot(self.vault), {})
+
+
+class Ledger(TempDirTestCase):
+    def setUp(self):
+        self.source = self.make_dir()
+        self.vault = self.make_dir()
+        self.ledger = self.make_dir() / "logs" / "ingest.log"
+
+    def run_it(self, **kwargs):
+        return run_batch(self.source, self.vault,
+                         note_writing_extractor(self.vault),
+                         today=TODAY, ledger=self.ledger, **kwargs)
+
+    def lines(self):
+        return self.ledger.read_text(encoding="utf-8").splitlines()
+
+    def test_exactly_one_line_per_run(self):
+        write_transcript(self.source, "a.md", "MeetingAaaa0000000001", "2026-07-19")
+
+        self.run_it()
+        self.assertEqual(len(self.lines()), 1)
+        self.run_it()
+        self.assertEqual(len(self.lines()), 2)
+
+    def test_line_carries_counts_and_skip_reasons(self):
+        write_transcript(self.source, "a.md", "MeetingAaaa0000000001", "2026-07-19")
+        write_transcript(self.source, "thin.md", "ThinMeeting0000000001",
+                         "2026-07-20", lines=["barely a word"])
+        write_transcript(self.source, "c.md", "MeetingCccc0000000001", "2026-07-21")
+        write_meeting_note(self.vault, "MeetingCccc0000000001")
+
+        self.run_it()
+
+        (line,) = self.lines()
+        self.assertIn("ingested=1", line)
+        self.assertIn("skipped=1", line)
+        self.assertIn("thin.md", line)
+        self.assertIn("thin transcript", line)
+        self.assertIn("already-present=1", line)
+
+    def test_thin_skip_is_not_recorded_as_a_success(self):
+        write_transcript(self.source, "thin.md", "ThinMeeting0000000001",
+                         "2026-07-20", lines=["barely a word"])
+
+        self.run_it()
+
+        (line,) = self.lines()
+        self.assertIn("ingested=0", line)
+        self.assertIn("skipped=1", line)
+        self.assertIn("thin.md", line)
+
+    def test_ledger_path_defaults_to_env(self):
+        env_ledger = self.make_dir() / "nested" / "env.log"
+        os.environ["MEM0_LEDGER"] = str(env_ledger)
+        self.addCleanup(os.environ.pop, "MEM0_LEDGER", None)
+        write_transcript(self.source, "a.md", "MeetingAaaa0000000001", "2026-07-19")
+
+        run_batch(self.source, self.vault,
+                  note_writing_extractor(self.vault), today=TODAY)
+
+        self.assertEqual(len(env_ledger.read_text(encoding="utf-8").splitlines()), 1)
+
+    def test_dry_run_writes_no_ledger_line(self):
+        write_transcript(self.source, "a.md", "MeetingAaaa0000000001", "2026-07-19")
+
+        self.run_it(dry_run=True)
+
+        self.assertFalse(self.ledger.exists())
 
 
 if __name__ == "__main__":

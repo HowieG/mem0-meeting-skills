@@ -8,6 +8,7 @@ meetings whose meeting_id appears nowhere under vault/Meetings/. The vault
 alone is authoritative — no watermarks, no timestamps, no state files.
 """
 import datetime
+import os
 import pathlib
 import sys
 from dataclasses import dataclass, field
@@ -115,12 +116,26 @@ def run_batch(source_dir, vault, extractor, window_days=7, today=None,
     return result
 
 
+def default_ledger():
+    """Outside the vault deliberately: a no-op tick must leave the vault
+    byte-identical so the auto-push loop makes no commit."""
+    return pathlib.Path(os.environ.get(
+        "MEM0_LEDGER",
+        pathlib.Path.home() / "Library" / "Logs" / "mem0-meeting-ingest.log",
+    )).expanduser()
+
+
 def _append_ledger_line(ledger, result):
-    ledger = pathlib.Path(ledger)
+    ledger = pathlib.Path(ledger) if ledger is not None else default_ledger()
     ledger.parent.mkdir(parents=True, exist_ok=True)
     stamp = datetime.datetime.now().isoformat(timespec="seconds")
     line = (f"{stamp} ingested={len(result.ingested)} "
-            f"skipped={len(result.skipped)} "
-            f"already-present={result.already_present}")
+            f"skipped={len(result.skipped)}")
+    if result.skipped:
+        reasons = "; ".join(r.replace("\n", " ") for r in result.skipped)
+        line += f" ({reasons})"
+    line += f" already-present={result.already_present}"
+    if result.failed:
+        line += f" failed={len(result.failed)} ({', '.join(result.failed)})"
     with ledger.open("a", encoding="utf-8") as fh:
         fh.write(line + "\n")
