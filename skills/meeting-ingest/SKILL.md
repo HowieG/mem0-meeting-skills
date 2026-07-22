@@ -38,6 +38,14 @@ Start it with:
 
 **You are exactly two steps. Do these and nothing else.**
 
+**Always run step 1, even if a previous ingest is still going.** Extraction
+takes minutes and ticks fire every 5, so step 2 will often find the lock held
+and skip — but fetching writes only to the inbox, never the vault, and
+id-suffixed filenames cannot collide. A tick that skips step 1 because it
+expects step 2 to be blocked wastes the window entirely; a tick that fetches
+anyway leaves the next one with work already staged and no fetch latency.
+Keep the inbox running ahead of the ingester.
+
 ### Step 1 — Fetch (only you can do this; MCP needs an agent)
 
 ```
@@ -48,11 +56,17 @@ INBOX=/Users/howardgil/Desktop/resources/circleback-inbox
 1. `SearchMeetings` with `pageIndex: 0`, `startDate` = 7 days before today,
    `endDate` = today.
 
+   **How many to fetch.** Keep **2–3 unprocessed transcripts staged** in the
+   inbox at all times. Fetch enough to top up to that depth, not the entire
+   backlog: the ingester consumes roughly one per tick, so a small buffer
+   absorbs lock-blocked ticks without pulling hundreds of transcripts through
+   your context. If the inbox already holds 3 un-ingested files, fetch nothing
+   and go straight to step 2.
+
    **Backlog fallback.** If that returns nothing — or everything it returns is
-   already in the vault — search again over the last 120 days and take the
-   **single most recent meeting not yet ingested**. One per tick, never the
-   whole backlog: each tick stays bounded, and the vault fills in at a steady
-   visible drip. To see what is already ingested:
+   already in the vault — search again over the last 120 days and top the
+   buffer up from the **most recent meetings not yet ingested**, newest first.
+   To see what is already ingested:
 
    ```bash
    python3 -c "
