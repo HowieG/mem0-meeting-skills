@@ -74,5 +74,55 @@ class FindCandidates(TempDirTestCase):
         self.assertIn("date", candidates[0].error)
 
 
+def write_meeting_note(vault, meeting_id):
+    notes = pathlib.Path(vault) / "Meetings"
+    notes.mkdir(parents=True, exist_ok=True)
+    (notes / f"{meeting_id}.md").write_text(
+        f'---\nmeeting-id: "{meeting_id}"\n---\n', encoding="utf-8")
+
+
+class FilterNew(TempDirTestCase):
+    def setUp(self):
+        self.source = self.make_dir()
+        self.vault = self.make_dir()
+
+    def candidates(self):
+        return find_candidates(self.source, window_days=7, today=TODAY)
+
+    def test_returns_exactly_the_not_yet_ingested(self):
+        write_transcript(self.source, "a.md", "MeetingAaaa0000000001", "2026-07-19")
+        write_transcript(self.source, "b.md", "MeetingBbbb0000000001", "2026-07-20")
+        write_meeting_note(self.vault, "MeetingAaaa0000000001")
+
+        new = filter_new(self.candidates(), self.vault)
+
+        self.assertEqual([c.path.name for c in new], ["b.md"])
+
+    def test_empty_once_all_notes_exist(self):
+        write_transcript(self.source, "a.md", "MeetingAaaa0000000001", "2026-07-19")
+        write_transcript(self.source, "b.md", "MeetingBbbb0000000001", "2026-07-20")
+        write_meeting_note(self.vault, "MeetingAaaa0000000001")
+        write_meeting_note(self.vault, "MeetingBbbb0000000001")
+
+        self.assertEqual(filter_new(self.candidates(), self.vault), [])
+
+    def test_id_anywhere_under_meetings_counts_as_done(self):
+        write_transcript(self.source, "a.md", "MeetingAaaa0000000001", "2026-07-19")
+        nested = pathlib.Path(self.vault) / "Meetings" / "transcripts"
+        nested.mkdir(parents=True)
+        (nested / "copy.md").write_text(
+            "- meeting_id: MeetingAaaa0000000001\n", encoding="utf-8")
+
+        self.assertEqual(filter_new(self.candidates(), self.vault), [])
+
+    def test_error_candidates_pass_through(self):
+        (self.source / "summary.md").write_text(
+            "# Weekly Summary\n\nNo header.\n", encoding="utf-8")
+
+        new = filter_new(self.candidates(), self.vault)
+
+        self.assertEqual([c.path.name for c in new], ["summary.md"])
+
+
 if __name__ == "__main__":
     unittest.main()

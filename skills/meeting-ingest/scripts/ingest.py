@@ -26,8 +26,9 @@ VAULT = pathlib.Path(
 ).expanduser()
 
 
-def already_ingested(meeting_id):
-    for note in (VAULT / "Meetings").glob("*.md"):
+def already_ingested(meeting_id, vault=None):
+    vault = VAULT if vault is None else pathlib.Path(vault)
+    for note in sorted((vault / "Meetings").rglob("*.md")):
         if meeting_id in note.read_text(encoding="utf-8"):
             return note.name
     return None
