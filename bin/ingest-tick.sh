@@ -24,6 +24,13 @@ log() { echo "$(stamp) $*" >> "$LEDGER"; }
 # --- Stage 1: fetch ------------------------------------------------------
 # MCP tool calls can only be made by an agent, so fetching is a headless
 # Claude run. It writes normalized transcripts to SOURCE_DIR and nothing else.
+#
+# MEM0_SKIP_FETCH=1 ingests whatever is already in SOURCE_DIR without calling
+# Circleback — for rehearsing the loop, and for backfilling transcripts that
+# were dropped in by hand.
+if [ "${MEM0_SKIP_FETCH:-0}" = "1" ]; then
+  log "fetch: skipped (MEM0_SKIP_FETCH=1)"
+else
 FETCH_PROMPT="Fetch new Circleback meetings and save them as transcript files.
 
 1. Call SearchMeetings with pageIndex 0 and a startDate of ${WINDOW_DAYS} days
@@ -58,6 +65,7 @@ if [ $FETCH_RC -ne 0 ]; then
   exit 0
 fi
 log "fetch: $(echo "$FETCH_OUT" | grep -o 'FETCHED [0-9]*' | tail -1 || echo 'no count reported')"
+fi
 
 # --- Stage 2: ingest -----------------------------------------------------
 python3 "$SCRIPTS/batch.py" "$SOURCE_DIR" --window-days "$WINDOW_DAYS"
