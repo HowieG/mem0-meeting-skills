@@ -47,9 +47,27 @@ INBOX=/Users/howardgil/Desktop/resources/circleback-inbox
 
 1. `SearchMeetings` with `pageIndex: 0`, `startDate` = 7 days before today,
    `endDate` = today.
-2. `GetTranscriptsForMeetings` for the returned ids (batch, ≤50 per call).
-   Don't pre-filter — step 2 handles idempotency, and skipping the filter here
-   only costs a little quota.
+
+   **Backlog fallback.** If that returns nothing — or everything it returns is
+   already in the vault — search again over the last 120 days and take the
+   **single most recent meeting not yet ingested**. One per tick, never the
+   whole backlog: each tick stays bounded, and the vault fills in at a steady
+   visible drip. To see what is already ingested:
+
+   ```bash
+   python3 -c "
+   import pathlib, re, os
+   v = pathlib.Path(os.environ.get('MEM0_VAULT', pathlib.Path.home()/'Documents'/'mem0 vault'))
+   for n in sorted((v/'Meetings').glob('*.md')):
+       m = re.search(r'^meeting-id:\s*\"?([^\"\n]+?)\"?\s*$', n.read_text(), re.M)
+       if m: print(m.group(1))"
+   ```
+
+   A meeting fetched via the fallback is dated in the past, so pass a wide
+   `--window-days` to step 2 or `find_candidates` will filter it straight back
+   out. Real meetings from the live window need no such flag.
+
+2. `GetTranscriptsForMeetings` for the ids you settled on (batch, ≤50 per call).
 3. Write each transcript with the project's normalizer. **Never hand-roll the
    format** — the parser rejects anything else, deliberately:
 
@@ -74,6 +92,14 @@ INBOX=/Users/howardgil/Desktop/resources/circleback-inbox
 
 ```bash
 MEM0_SKIP_FETCH=1 /Users/howardgil/Desktop/resources/mem0-meeting-skills/bin/ingest-tick.sh
+```
+
+If you fetched a backlog meeting (older than the live window), widen the window
+for this run so it isn't filtered back out:
+
+```bash
+MEM0_SKIP_FETCH=1 INGEST_WINDOW_DAYS=120 \
+  /Users/howardgil/Desktop/resources/mem0-meeting-skills/bin/ingest-tick.sh
 ```
 
 This skips only the fetch you just did, then: filters out meetings already in
