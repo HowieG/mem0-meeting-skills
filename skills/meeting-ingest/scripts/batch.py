@@ -10,11 +10,14 @@ alone is authoritative — no watermarks, no timestamps, no state files.
 import datetime
 import pathlib
 import sys
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 
 sys.path.insert(0, str(pathlib.Path(__file__).parent))
 from circleback_parser import ParseError, parse
 from ingest import already_ingested
+
+
+THIN_TRANSCRIPT_WORDS = 20
 
 
 @dataclass(frozen=True)
@@ -22,6 +25,15 @@ class Candidate:
     path: pathlib.Path
     meeting: object = None
     error: str = None
+
+
+@dataclass
+class BatchResult:
+    ingested: list = field(default_factory=list)
+    skipped: list = field(default_factory=list)
+    failed: list = field(default_factory=list)
+    would_ingest: list = field(default_factory=list)
+    already_present: int = 0
 
 
 def find_candidates(source_dir, window_days, today):
@@ -60,3 +72,55 @@ def filter_new(candidates, vault):
     return [c for c in candidates
             if c.meeting is None
             or not already_ingested(c.meeting.meeting_id, vault)]
+
+
+def run_batch(source_dir, vault, extractor, window_days=7, today=None,
+              dry_run=False, ledger=None):
+    """One idempotent tick: ingest every new candidate, ledger the outcome.
+
+    The extractor is injected — production wraps the headless claude call
+    from ingest.py. Success is judged only by the vault: after each extractor
+    call the meeting_id must appear under vault/Meetings/, else the meeting
+    counts as failed and will be retried next tick.
+    """
+    if today is None:
+        today = datetime.date.today()
+    vault = pathlib.Path(vault)
+
+    candidates = find_candidates(source_dir, window_days, today)
+    new = filter_new(candidates, vault)
+    result = BatchResult(already_present=len(candidates) - len(new))
+
+    for candidate in new:
+        if candidate.error is not None:
+            result.skipped.append(candidate.error)
+            continue
+        words = sum(len(seg.text.split()) for seg in candidate.meeting.segments)
+        if words < THIN_TRANSCRIPT_WORDS:
+            result.skipped.append(
+                f"{candidate.path.name}: thin transcript "
+                f"({words} words of segment text)")
+            continue
+        if dry_run:
+            result.would_ingest.append(candidate.path.name)
+            continue
+        extractor(candidate.meeting, candidate.path)
+        if already_ingested(candidate.meeting.meeting_id, vault):
+            result.ingested.append(candidate.path.name)
+        else:
+            result.failed.append(candidate.path.name)
+
+    if not dry_run:
+        _append_ledger_line(ledger, result)
+    return result
+
+
+def _append_ledger_line(ledger, result):
+    ledger = pathlib.Path(ledger)
+    ledger.parent.mkdir(parents=True, exist_ok=True)
+    stamp = datetime.datetime.now().isoformat(timespec="seconds")
+    line = (f"{stamp} ingested={len(result.ingested)} "
+            f"skipped={len(result.skipped)} "
+            f"already-present={result.already_present}")
+    with ledger.open("a", encoding="utf-8") as fh:
+        fh.write(line + "\n")

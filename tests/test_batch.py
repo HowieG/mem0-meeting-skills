@@ -7,7 +7,7 @@ import unittest
 sys.path.insert(0, str(pathlib.Path(__file__).parent.parent
                        / "skills" / "meeting-ingest" / "scripts"))
 
-from batch import filter_new, find_candidates
+from batch import filter_new, find_candidates, run_batch
 
 TODAY = datetime.date(2026, 7, 21)
 
@@ -122,6 +122,98 @@ class FilterNew(TempDirTestCase):
         new = filter_new(self.candidates(), self.vault)
 
         self.assertEqual([c.path.name for c in new], ["summary.md"])
+
+
+def note_writing_extractor(vault):
+    def extract(meeting, path):
+        write_meeting_note(vault, meeting.meeting_id)
+    return extract
+
+
+def vault_snapshot(vault):
+    root = pathlib.Path(vault)
+    return {str(p.relative_to(root)): p.read_bytes()
+            for p in sorted(root.rglob("*")) if p.is_file()}
+
+
+class RunBatch(TempDirTestCase):
+    def setUp(self):
+        self.source = self.make_dir()
+        self.vault = self.make_dir()
+        self.ledger = self.make_dir() / "logs" / "ingest.log"
+
+    def run_it(self, extractor=None, **kwargs):
+        extractor = extractor or note_writing_extractor(self.vault)
+        return run_batch(self.source, self.vault, extractor,
+                         today=TODAY, ledger=self.ledger, **kwargs)
+
+    def test_ingests_new_and_reports_already_present(self):
+        write_transcript(self.source, "a.md", "MeetingAaaa0000000001", "2026-07-19")
+        write_transcript(self.source, "b.md", "MeetingBbbb0000000001", "2026-07-20")
+        write_transcript(self.source, "c.md", "MeetingCccc0000000001", "2026-07-21")
+        write_meeting_note(self.vault, "MeetingCccc0000000001")
+
+        result = self.run_it()
+
+        self.assertEqual(sorted(result.ingested), ["a.md", "b.md"])
+        self.assertEqual(result.already_present, 1)
+        self.assertEqual(result.skipped, [])
+        self.assertEqual(result.failed, [])
+
+    def test_second_run_is_a_no_op_and_vault_is_byte_identical(self):
+        write_transcript(self.source, "a.md", "MeetingAaaa0000000001", "2026-07-19")
+        write_transcript(self.source, "b.md", "MeetingBbbb0000000001", "2026-07-20")
+        write_transcript(self.source, "c.md", "MeetingCccc0000000001", "2026-07-21")
+        write_meeting_note(self.vault, "MeetingCccc0000000001")
+
+        self.run_it()
+        before = vault_snapshot(self.vault)
+        result = self.run_it()
+
+        self.assertEqual(result.ingested, [])
+        self.assertEqual(result.already_present, 3)
+        self.assertEqual(vault_snapshot(self.vault), before)
+
+    def test_thin_transcript_skipped_and_nothing_written(self):
+        write_transcript(self.source, "thin.md", "ThinMeeting0000000001",
+                         "2026-07-20", lines=["hello there", "not much said"])
+
+        result = self.run_it()
+
+        self.assertEqual(result.ingested, [])
+        self.assertEqual(len(result.skipped), 1)
+        self.assertIn("thin.md", result.skipped[0])
+        self.assertEqual(vault_snapshot(self.vault), {})
+
+    def test_unparseable_file_skipped_with_reason(self):
+        (self.source / "summary.md").write_text(
+            "# Weekly Summary\n\nNo header.\n", encoding="utf-8")
+
+        result = self.run_it()
+
+        self.assertEqual(result.ingested, [])
+        self.assertEqual(len(result.skipped), 1)
+        self.assertIn("summary.md", result.skipped[0])
+        self.assertEqual(vault_snapshot(self.vault), {})
+
+    def test_extractor_that_records_nothing_counts_as_failed(self):
+        write_transcript(self.source, "a.md", "MeetingAaaa0000000001", "2026-07-19")
+
+        result = self.run_it(extractor=lambda meeting, path: None)
+
+        self.assertEqual(result.ingested, [])
+        self.assertEqual(result.failed, ["a.md"])
+
+    def test_dry_run_calls_no_extractor_and_writes_nothing(self):
+        write_transcript(self.source, "a.md", "MeetingAaaa0000000001", "2026-07-19")
+        calls = []
+
+        result = self.run_it(
+            extractor=lambda meeting, path: calls.append(path), dry_run=True)
+
+        self.assertEqual(calls, [])
+        self.assertEqual(result.would_ingest, ["a.md"])
+        self.assertEqual(vault_snapshot(self.vault), {})
 
 
 if __name__ == "__main__":
