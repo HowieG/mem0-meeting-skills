@@ -54,7 +54,15 @@ INBOX=/Users/howardgil/Desktop/resources/circleback-inbox
 ```
 
 1. `SearchMeetings` with `pageIndex: 0`, `startDate` = 7 days before today,
-   `endDate` = today.
+   **`endDate` = tomorrow**.
+
+   `endDate` must be tomorrow, not today. Circleback timestamps meetings in
+   **UTC**, so an evening call in the Americas is stored under the *next*
+   calendar day — a 7:35pm PDT meeting has `createdAt: 2026-07-22T02:35Z`.
+   Using today as `endDate` silently excludes everything recorded that
+   evening, which is exactly when a "record a meeting right before the demo"
+   plan puts it. Observed: `endDate=2026-07-21` returned nothing while
+   `endDate=2026-07-23` returned all 8 meetings from that evening.
 
    **How many to fetch.** Keep **2–3 unprocessed transcripts staged** in the
    inbox at all times. Fetch enough to top up to that depth, not the entire
