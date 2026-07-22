@@ -1,0 +1,44 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+    <key>Label</key>
+    <string>com.howieg.mem0.ingest</string>
+
+    <key>ProgramArguments</key>
+    <array>
+        <string>/bin/bash</string>
+        <string>/Users/howardgil/Desktop/resources/mem0-meeting-skills/bin/ingest-tick.sh</string>
+    </array>
+
+    <!-- Every 5 minutes. Demo plumbing: the real trigger is a Circleback
+         meeting-end webhook, which is v2. -->
+    <key>StartInterval</key>
+    <integer>300</integer>
+
+    <key>EnvironmentVariables</key>
+    <dict>
+        <!-- launchd starts with a minimal PATH; claude, git and python3 all
+             live outside it. -->
+        <key>PATH</key>
+        <string>/Users/howardgil/.local/bin:/opt/homebrew/bin:/usr/local/bin:/usr/bin:/bin:/usr/sbin:/sbin</string>
+        <key>HOME</key>
+        <string>/Users/howardgil</string>
+        <key>MEM0_VAULT</key>
+        <string>/Users/howardgil/Documents/mem0 vault</string>
+        <key>MEM0_TRANSCRIPTS</key>
+        <string>/Users/howardgil/Desktop/resources/circleback-inbox</string>
+        <key>INGEST_WINDOW_DAYS</key>
+        <string>7</string>
+    </dict>
+
+    <key>StandardOutPath</key>
+    <string>/Users/howardgil/Library/Logs/mem0-ingest-stdout.log</string>
+    <key>StandardErrorPath</key>
+    <string>/Users/howardgil/Library/Logs/mem0-ingest-stderr.log</string>
+
+    <!-- Don't fire on load: the demo starts the loop deliberately. -->
+    <key>RunAtLoad</key>
+    <false/>
+</dict>
+</plist>
