@@ -7,7 +7,7 @@ import unittest
 sys.path.insert(0, str(pathlib.Path(__file__).parent.parent
                        / "skills" / "meeting-ingest" / "scripts"))
 
-from batch import find_candidates
+from batch import filter_new, find_candidates
 
 TODAY = datetime.date(2026, 7, 21)
 
