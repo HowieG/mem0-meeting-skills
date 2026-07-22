@@ -215,6 +215,60 @@ def simple(folder, name, mtg, mdate, *, aliases=(), kind=None, desc=None,
     return "created"
 
 
+# ---------------------------------------------------------- resolution queue
+
+def _notes_bullets(body):
+    """The bullets under '## Notes' — the evidence a human needs to resolve."""
+    m = re.search(r"^## Notes\n((?:- .*\n)*)", body, re.M)
+    return re.findall(r"^- (.*)$", m.group(1), re.M) if m else []
+
+
+def queue():
+    """Every People/Companies note needing human resolution, as gap dicts.
+
+    Deliberately broader than audit()'s stale-stub check: a single-meeting
+    stub is invisible to audit() but still a gap a human must clear. One
+    entry per note; 'kind' lists every reason it is queued.
+    """
+    gaps = []
+    for folder in ("People", "Companies"):
+        d = VAULT / folder
+        if not d.exists():
+            continue
+        for p in sorted(d.glob("*.md")):
+            fm, body = _split(p.read_text(encoding="utf-8"))
+            kind, fields = [], []
+            if _get(fm, "status") == "unconfirmed":
+                kind.append("unconfirmed-status")
+            for key in ("company", "role"):
+                v = _get(fm, key)
+                if v is not None and (not v.strip() or _is_unknown(v)):
+                    fields.append(key)
+            if fields:
+                kind.append("unknown-field")
+            if kind:
+                gaps.append({"path": str(p), "name": p.stem, "kind": kind,
+                             "fields": fields, "evidence": _notes_bullets(body)})
+    return gaps
+
+
+def report_queue(gaps):
+    """Print a queue human-readably. Returns True if the queue is empty."""
+    if not gaps:
+        print("QUEUE EMPTY")
+        return True
+    print(f"QUEUE: {len(gaps)} note(s) need human resolution")
+    for g in gaps:
+        line = f"  {g['name']} [{', '.join(g['kind'])}]"
+        if g["fields"]:
+            line += f" — unknown: {', '.join(g['fields'])}"
+        print(line)
+        print(f"    path: {g['path']}")
+        for e in g["evidence"]:
+            print(f"    | {e}")
+    return False
+
+
 # -------------------------------------------------------------------- audit
 
 def _known_names():
@@ -297,4 +351,8 @@ def report(a):
 
 
 if __name__ == "__main__":
+    import sys
+    if "--queue" in sys.argv[1:]:
+        # exit 3, not 1, so callers can tell "gaps to resolve" from a failed audit
+        raise SystemExit(0 if report_queue(queue()) else 3)
     raise SystemExit(0 if report(audit()) else 1)
