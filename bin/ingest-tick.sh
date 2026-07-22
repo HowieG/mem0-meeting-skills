@@ -17,6 +17,29 @@ mkdir -p "$(dirname "$LEDGER")"
 stamp() { date "+%Y-%m-%d %H:%M:%S"; }
 log() { echo "$(stamp) $*" >> "$LEDGER"; }
 
+# --- single-instance lock -------------------------------------------------
+# Extraction takes minutes; the loop fires every 5. Overlap is the normal case,
+# not an edge case. Two ticks writing the same notes and both running `git
+# commit` is precisely the concurrency hazard v1 is meant to avoid — and unlike
+# launchd (which refuses to start a second instance of a job under one label),
+# a cron/`/loop` trigger will happily start one. mkdir is atomic on every FS
+# that matters, so it is the lock.
+LOCK="${MEM0_LOCK:-${TMPDIR:-/tmp}/mem0-ingest-tick.lock}"
+if ! mkdir "$LOCK" 2>/dev/null; then
+  HELD_BY="$(cat "$LOCK/pid" 2>/dev/null || echo unknown)"
+  if [ "$HELD_BY" != unknown ] && ! kill -0 "$HELD_BY" 2>/dev/null; then
+    # Previous run died without releasing. Reclaim rather than wedge forever.
+    log "lock: stale (pid $HELD_BY gone) — reclaiming"
+    rm -rf "$LOCK"
+    mkdir "$LOCK" 2>/dev/null || { log "lock: could not reclaim, skipping tick"; exit 0; }
+  else
+    log "skipped: previous tick still running (pid $HELD_BY)"
+    exit 0
+  fi
+fi
+echo $$ > "$LOCK/pid"
+trap 'rm -rf "$LOCK"' EXIT
+
 # A tick must never leave the loop wedged: if any stage fails, log it and let
 # the next tick retry. The vault is the only state, so a failed tick is a
 # no-op, not a corruption.
