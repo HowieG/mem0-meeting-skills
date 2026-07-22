@@ -94,9 +94,15 @@ fi
 # --- Stage 2: ingest -----------------------------------------------------
 python3 "$SCRIPTS/batch.py" "$SOURCE_DIR" --window-days "$WINDOW_DAYS"
 INGEST_RC=$?
+# batch.py exits non-zero when ANY meeting failed, even if others succeeded.
+# Aborting here would strand the successful meetings' notes uncommitted while
+# logging "vault left unchanged" — which is false — and a meeting that fails
+# every time would block publishing forever. Fall through to publish instead:
+# stage 3 commits only when the vault actually changed, so a genuinely empty
+# run is still a no-op. The failed meeting has no summary note, so the id
+# filter retries it next tick.
 if [ $INGEST_RC -ne 0 ]; then
-  log "ingest FAILED (exit $INGEST_RC) — vault left unchanged, retrying next tick"
-  exit 0
+  log "ingest: partial failure (exit $INGEST_RC) — publishing what succeeded, failed meetings retry next tick"
 fi
 
 # --- Stage 3: publish ----------------------------------------------------
