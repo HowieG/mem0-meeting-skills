@@ -1,6 +1,7 @@
 import datetime
 import os
 import pathlib
+import subprocess
 import sys
 import tempfile
 import unittest
@@ -283,6 +284,45 @@ class Ledger(TempDirTestCase):
         self.run_it(dry_run=True)
 
         self.assertFalse(self.ledger.exists())
+
+
+BATCH_SCRIPT = (pathlib.Path(__file__).parent.parent
+                / "skills" / "meeting-ingest" / "scripts" / "batch.py")
+
+
+class Cli(TempDirTestCase):
+    def setUp(self):
+        self.source = self.make_dir()
+        self.vault = self.make_dir()
+        self.ledger = self.make_dir() / "logs" / "ingest.log"
+
+    def run_cli(self, *args):
+        env = dict(os.environ,
+                   MEM0_VAULT=str(self.vault), MEM0_LEDGER=str(self.ledger))
+        return subprocess.run(
+            [sys.executable, str(BATCH_SCRIPT), str(self.source), *args],
+            capture_output=True, text=True, env=env)
+
+    def test_dry_run_lists_would_ingest_and_touches_nothing(self):
+        write_transcript(self.source, "a.md", "MeetingAaaa0000000001",
+                         datetime.date.today().isoformat())
+
+        proc = self.run_cli("--dry-run")
+
+        self.assertEqual(proc.returncode, 0, proc.stderr)
+        self.assertIn("would ingest a.md", proc.stdout)
+        self.assertEqual(vault_snapshot(self.vault), {})
+        self.assertFalse(self.ledger.exists())
+
+    def test_window_days_flag_narrows_the_window(self):
+        write_transcript(
+            self.source, "old.md", "OldMeeting00000000001",
+            (datetime.date.today() - datetime.timedelta(days=5)).isoformat())
+
+        proc = self.run_cli("--dry-run", "--window-days", "2")
+
+        self.assertEqual(proc.returncode, 0, proc.stderr)
+        self.assertNotIn("old.md", proc.stdout)
 
 
 if __name__ == "__main__":

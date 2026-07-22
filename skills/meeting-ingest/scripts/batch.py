@@ -7,6 +7,7 @@ Scans source_dir for transcripts dated within the window and ingests only
 meetings whose meeting_id appears nowhere under vault/Meetings/. The vault
 alone is authoritative — no watermarks, no timestamps, no state files.
 """
+import argparse
 import datetime
 import os
 import pathlib
@@ -14,6 +15,7 @@ import sys
 from dataclasses import dataclass, field
 
 sys.path.insert(0, str(pathlib.Path(__file__).parent))
+import ingest
 from circleback_parser import ParseError, parse
 from ingest import already_ingested
 
@@ -139,3 +141,36 @@ def _append_ledger_line(ledger, result):
         line += f" failed={len(result.failed)} ({', '.join(result.failed)})"
     with ledger.open("a", encoding="utf-8") as fh:
         fh.write(line + "\n")
+
+
+def claude_extractor(meeting, path):
+    ingest.run_extractor(meeting, path)
+
+
+def main(argv=None):
+    ap = argparse.ArgumentParser(description=__doc__)
+    ap.add_argument("source_dir")
+    ap.add_argument("--window-days", type=int, default=7)
+    ap.add_argument("--dry-run", action="store_true")
+    args = ap.parse_args(argv)
+
+    result = run_batch(args.source_dir, ingest.VAULT, claude_extractor,
+                       window_days=args.window_days, dry_run=args.dry_run)
+
+    if args.dry_run:
+        for name in result.would_ingest:
+            print(f"would ingest {name}")
+        for reason in result.skipped:
+            print(f"would skip {reason}")
+        print(f"dry-run: {len(result.would_ingest)} to ingest, "
+              f"{len(result.skipped)} skipped, "
+              f"{result.already_present} already present")
+    else:
+        print(f"ingested={len(result.ingested)} skipped={len(result.skipped)} "
+              f"already-present={result.already_present} "
+              f"failed={len(result.failed)}")
+    return 1 if result.failed else 0
+
+
+if __name__ == "__main__":
+    sys.exit(main())

@@ -68,6 +68,27 @@ Report at the end: notes created/updated, unconfirmed entities left behind.
 """
 
 
+def run_extractor(meeting, path):
+    """Headless claude extraction followed by the vault audit. Returns 0 iff
+    both succeeded; verifying that the meeting actually landed is the
+    caller's job (the vault alone is authoritative)."""
+    result = subprocess.run(
+        ["claude", "-p", extraction_prompt(meeting, pathlib.Path(path).resolve()),
+         "--add-dir", str(VAULT),
+         "--allowedTools", "Read", "Write", "Edit", "Glob", "Grep",
+         "Bash(python3:*)", "Bash(ls:*)", "Bash(cp:*)"],
+        text=True)
+    if result.returncode != 0:
+        print(f"extraction failed (exit {result.returncode})", file=sys.stderr)
+        return result.returncode
+
+    audit = subprocess.run(
+        [sys.executable, str(VAULTMERGE_DIR / "vaultmerge.py")])
+    if audit.returncode != 0:
+        print("audit FAILED after ingest — vault needs attention", file=sys.stderr)
+    return audit.returncode
+
+
 def main():
     ap = argparse.ArgumentParser()
     ap.add_argument("transcript")
@@ -86,21 +107,9 @@ def main():
         print(f"already ingested ({existing}) — nothing to do")
         return 0
 
-    result = subprocess.run(
-        ["claude", "-p", extraction_prompt(meeting, pathlib.Path(args.transcript).resolve()),
-         "--add-dir", str(VAULT),
-         "--allowedTools", "Read", "Write", "Edit", "Glob", "Grep",
-         "Bash(python3:*)", "Bash(ls:*)", "Bash(cp:*)"],
-        text=True)
-    if result.returncode != 0:
-        print(f"extraction failed (exit {result.returncode})", file=sys.stderr)
-        return result.returncode
-
-    audit = subprocess.run(
-        [sys.executable, str(VAULTMERGE_DIR / "vaultmerge.py")])
-    if audit.returncode != 0:
-        print("audit FAILED after ingest — vault needs attention", file=sys.stderr)
-        return audit.returncode
+    rc = run_extractor(meeting, args.transcript)
+    if rc != 0:
+        return rc
 
     if not already_ingested(meeting.meeting_id):
         print("extraction completed but no note carries the meeting_id — "
