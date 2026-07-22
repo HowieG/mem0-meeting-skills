@@ -11,6 +11,7 @@ identities are written `status: unconfirmed` per the pipeline skill.
 import argparse
 import os
 import pathlib
+import re
 import subprocess
 import sys
 
@@ -25,11 +26,35 @@ VAULT = pathlib.Path(
     os.environ.get("MEM0_VAULT", pathlib.Path.home() / "Documents" / "mem0 vault")
 ).expanduser()
 
+#: Seconds before a headless extraction is abandoned. A long transcript can
+#: legitimately take minutes; a stalled one must never hold the loop open.
+EXTRACT_TIMEOUT = int(os.environ.get("MEM0_EXTRACT_TIMEOUT", "900"))
+
+
+_MEETING_ID_KEY = re.compile(r'^meeting-id:\s*"?([^"\n]+?)"?\s*$', re.M)
+
 
 def already_ingested(meeting_id, vault=None):
+    """Return the summary note recording this meeting, or None.
+
+    Deliberately narrow on two axes, both of which have bitten:
+
+    - **Summaries only** (`glob`, not `rglob`). The extractor copies the
+      transcript into Meetings/transcripts/ as its first action, and normalized
+      transcripts carry `- meeting_id:` in their header. A recursive search
+      calls the meeting done the moment that copy lands — so an extractor that
+      dies mid-run leaves the meeting excluded forever, with no note and no
+      error. A skip must never look like a success.
+    - **Frontmatter key, not substring.** An id quoted in prose, or one that is
+      a prefix of another id, must not count as doneness.
+    """
     vault = VAULT if vault is None else pathlib.Path(vault)
-    for note in sorted((vault / "Meetings").rglob("*.md")):
-        if meeting_id in note.read_text(encoding="utf-8"):
+    meetings = vault / "Meetings"
+    if not meetings.is_dir():
+        return None
+    for note in sorted(meetings.glob("*.md")):
+        found = _MEETING_ID_KEY.search(note.read_text(encoding="utf-8"))
+        if found and found.group(1).strip() == meeting_id:
             return note.name
     return None
 
@@ -72,12 +97,24 @@ def run_extractor(meeting, path):
     """Headless claude extraction followed by the vault audit. Returns 0 iff
     both succeeded; verifying that the meeting actually landed is the
     caller's job (the vault alone is authoritative)."""
-    result = subprocess.run(
-        ["claude", "-p", extraction_prompt(meeting, pathlib.Path(path).resolve()),
-         "--add-dir", str(VAULT),
-         "--allowedTools", "Read", "Write", "Edit", "Glob", "Grep",
-         "Bash(python3:*)", "Bash(ls:*)", "Bash(cp:*)"],
-        text=True)
+    source = pathlib.Path(path).resolve()
+    try:
+        result = subprocess.run(
+            ["claude", "-p", extraction_prompt(meeting, source),
+             "--add-dir", str(VAULT),
+             # The transcript lives outside the vault, and under launchd the
+             # cwd is /. Without this the extractor cannot read its own input.
+             "--add-dir", str(source.parent),
+             "--allowedTools", "Read", "Write", "Edit", "Glob", "Grep",
+             "Bash(python3:*)", "Bash(ls:*)", "Bash(cp:*)"],
+            text=True, timeout=EXTRACT_TIMEOUT)
+    except subprocess.TimeoutExpired:
+        # Unbounded, one stalled call blocks every later tick: launchd will not
+        # start a second instance of a job already running under this label, so
+        # the loop would go quiet — indistinguishable from "no new meetings".
+        print(f"extraction timed out after {EXTRACT_TIMEOUT}s — "
+              "meeting left un-ingested, will retry next tick", file=sys.stderr)
+        return 1
     if result.returncode != 0:
         print(f"extraction failed (exit {result.returncode})", file=sys.stderr)
         return result.returncode

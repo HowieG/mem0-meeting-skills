@@ -54,7 +54,8 @@ FETCH_PROMPT="Fetch new Circleback meetings and save them as transcript files.
 
 Do not modify the vault. Do not ingest. Fetching is the whole job."
 
-FETCH_OUT="$(claude -p "$FETCH_PROMPT" \
+FETCH_OUT="$(MEM0_FETCH_TIMEOUT=${MEM0_FETCH_TIMEOUT:-600} \
+  timeout "${MEM0_FETCH_TIMEOUT:-600}" claude -p "$FETCH_PROMPT" \
   --add-dir "$SOURCE_DIR" \
   --allowedTools "Read" "Write" "Glob" "Grep" "Bash(python3:*)" \
   "mcp__circleback__SearchMeetings" "mcp__circleback__GetTranscriptsForMeetings" \
@@ -78,8 +79,18 @@ fi
 # --- Stage 3: publish ----------------------------------------------------
 # Only commits when the vault actually changed, so quiet ticks leave no trace
 # in git history. This is what makes "no new meetings" observable as silence.
-cd "$VAULT" || { log "vault not found at $VAULT"; exit 0; }
-if [ -z "$(git status --porcelain)" ]; then
+cd "$VAULT" || { log "publish: vault not found at $VAULT"; exit 0; }
+
+# Capture status and exit code separately. `[ -z "$(git status)" ]` treats any
+# git failure -- not a repo, index.lock held by Obsidian -- as "no changes", so
+# publishing would silently never happen while the ledger reported health.
+CHANGES="$(git status --porcelain 2>/dev/null)"
+GIT_RC=$?
+if [ $GIT_RC -ne 0 ]; then
+  log "publish: git status FAILED (exit $GIT_RC) in $VAULT — not published"
+  exit 0
+fi
+if [ -z "$CHANGES" ]; then
   log "publish: vault unchanged, no commit"
   exit 0
 fi

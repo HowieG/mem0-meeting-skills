@@ -67,6 +67,13 @@ def parse(path):
             "normalized Circleback export"
         )
 
+    declared = fields.get("segments")
+    if declared is not None and declared.isdigit() and int(declared) != len(segments):
+        raise ParseError(
+            f"{path.name}: header declares {declared} segments but {len(segments)} "
+            "parsed — the export format drifted and dialogue is being dropped"
+        )
+
     if not segments:
         raise ParseError(
             f"{path.name}: zero speaker segments — either the transcript is "

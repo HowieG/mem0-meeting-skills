@@ -108,14 +108,22 @@ class FilterNew(TempDirTestCase):
 
         self.assertEqual(filter_new(self.candidates(), self.vault), [])
 
-    def test_id_anywhere_under_meetings_counts_as_done(self):
+    def test_transcript_copy_alone_does_not_count_as_done(self):
+        """A copied transcript is not an ingest.
+
+        The extractor copies the transcript into Meetings/transcripts/ before
+        writing any note, and that copy carries the meeting_id in its header.
+        Counting it as done would mean an extractor that died right after
+        copying loses the meeting forever — no note, no error, and excluded
+        from every future run.
+        """
         write_transcript(self.source, "a.md", "MeetingAaaa0000000001", "2026-07-19")
         nested = pathlib.Path(self.vault) / "Meetings" / "transcripts"
         nested.mkdir(parents=True)
         (nested / "copy.md").write_text(
             "- meeting_id: MeetingAaaa0000000001\n", encoding="utf-8")
 
-        self.assertEqual(filter_new(self.candidates(), self.vault), [])
+        self.assertEqual(len(filter_new(self.candidates(), self.vault)), 1)
 
     def test_error_candidates_pass_through(self):
         (self.source / "summary.md").write_text(

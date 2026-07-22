@@ -26,6 +26,50 @@ python3 <this-dir>/scripts/ingest.py <transcript.md>
   `status: unconfirmed` with `Unknown` fields — `/brain-resolution` clears
   them later.
 
+## Unattended tick (what `/loop` runs)
+
+One tick = fetch new meetings, ingest them, publish the vault. Run it with:
+
+```
+/loop 5m Run one meeting-ingest tick per the "Unattended tick" section of the meeting-ingest skill.
+```
+
+You are an agent, so **you** make the Circleback MCP calls directly — there is
+no nested headless run for fetching. Do exactly this, and nothing else:
+
+1. `SearchMeetings` with `pageIndex: 0`, `startDate` = `INGEST_WINDOW_DAYS`
+   (default 7) before today, `endDate` = today.
+2. For each result, check whether any file under `<vault>/Meetings/` already
+   contains its id. Skip those — already ingested. **This check is the only
+   thing preventing double-ingestion; never skip it.**
+3. `GetTranscriptsForMeetings` for the ids that remain (batch, ≤50 per call).
+4. Write each one to the inbox using the project's normalizer — never
+   hand-roll the format:
+
+   ```python
+   import sys; sys.path.insert(0, "<this-dir>/scripts")
+   from circleback_fetch import write_transcript
+   write_transcript(meeting_dict, transcript_list, inbox_dir)
+   ```
+
+   An empty transcript means Circleback is still processing. `write_transcript`
+   returns `None` and writes nothing — correct. A partial file would let the id
+   filter mark the meeting done forever.
+5. Run the batch ingester, which spawns an isolated headless extraction per
+   meeting so a long transcript never floods this session's context:
+
+   ```bash
+   python3 <this-dir>/scripts/batch.py <inbox_dir> --window-days 7
+   ```
+
+6. If `<vault>` has changes, commit (`chore(vault): automated ingest <stamp>`)
+   and push. If it has none, **make no commit** — a quiet tick must leave no
+   trace in git history.
+7. Report one line: meetings fetched, ingested, skipped, and whether you pushed.
+
+Never ask the user anything during a tick. Gaps are written into the vault as
+`status: unconfirmed` and cleared later by `brain-resolution`.
+
 ## Validate without ingesting
 
 ```bash

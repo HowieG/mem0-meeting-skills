@@ -19,8 +19,19 @@ def slugify(title):
 
 
 def _clock(seconds):
+    """Render seconds as MM:SS, or HH:MM:SS once past an hour.
+
+    Minutes must not run past two digits: the parser anchors on \\d{2}:\\d{2}
+    with an optional third group, so a bare `[100:05]` matches nothing and the
+    segment vanishes silently. A two-hour call would ingest with only its first
+    100 minutes of dialogue and never raise.
+    """
     total = int(seconds)
-    return f"{total // 60:02d}:{total % 60:02d}"
+    hours, rem = divmod(total, 3600)
+    minutes, secs = divmod(rem, 60)
+    if hours:
+        return f"{hours:02d}:{minutes:02d}:{secs:02d}"
+    return f"{minutes:02d}:{secs:02d}"
 
 
 def normalize(meeting, transcript):
